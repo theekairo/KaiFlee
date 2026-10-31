@@ -10,7 +10,7 @@ local environment = sharedEnvironment()
 local runtimeKey = "__KaiFleeRuntime"
 local startupState, startupCleanup, startInfiniteYield
 local function startKaiFlee()
--- KaiFlee 3.7 | made by nexus | .gg/znwCgvzBgu
+-- KaiFlee 3.8 | made by nexus | .gg/znwCgvzBgu
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Input = game:GetService("UserInputService")
@@ -29,9 +29,9 @@ end
 
 local config = {
     esp = true, names = false,
-    computers = true, pods = true, throughWalls = true,
+    computers = true, pods = true,
     fullbright = false,
-    autoRescue = false, noFail = false, slowBeast = false, untie = false,
+    autoRescue = false, noFail = true, slowBeast = false, untie = false,
 }
 local defaults = table.clone(config)
 local ESP_DISTANCE = 5000
@@ -249,7 +249,7 @@ local tabBar = make("ScrollingFrame", {
 local selectedTab = make("Frame", {BackgroundColor3 = theme.card, BorderSizePixel = 0, Size = UDim2.fromOffset(142, 33)}, tabBar)
 corner(selectedTab, 7)
 label(window, "правый shift — меню", 11, UDim2.new(0, 24, 1, -34), UDim2.fromOffset(470, 20), theme.muted)
-local version = label(window, "3.7", 11, UDim2.new(1, -70, 1, -34), UDim2.fromOffset(46, 20), theme.muted)
+local version = label(window, "3.8", 11, UDim2.new(1, -70, 1, -34), UDim2.fromOffset(46, 20), theme.muted)
 version.TextXAlignment = Enum.TextXAlignment.Right
 local function selectPage(name)
     if selectedPage ~= name then
@@ -291,7 +291,7 @@ local function card(parent, height, order)
     make("Frame", {BackgroundColor3 = theme.line, BackgroundTransparency = 0.5, BorderSizePixel = 0, Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1)}, item)
     return item
 end
-local featureNotes = {noFail = "Работает, возможны ошибки"}
+local featureNotes = {}
 local featureStatus = {}
 local function status(key, text)
     featureStatus[key] = text
@@ -425,17 +425,16 @@ toggle(visuals, "computers", "Компьютеры", 2)
 toggle(visuals, "pods", "Капсулы", 3)
 toggle(visuals, "names", "Ники игроков", 4)
 toggle(automation, "autoRescue", "Автоспасение", 1)
-toggle(automation, "noFail", "Взлом без ошибок", 2)
+toggle(automation, "noFail", "Автовзлом ПК", 2)
 toggle(trolling, "slowBeast", "Замедление чудовища", 1)
 toggle(trolling, "untie", "Автоотвязка мирных", 2)
-toggle(settings, "throughWalls", "ESP сквозь стены", 1)
-toggle(settings, "fullbright", "Яркое освещение", 2, updateLighting)
-local resetCard = card(settings, 56, 3)
+toggle(settings, "fullbright", "Яркое освещение", 1, updateLighting)
+local resetCard = card(settings, 56, 2)
 local reset = button(resetCard, "Сбросить настройки", UDim2.fromOffset(8, 8), UDim2.new(1, -16, 0, 35))
-local unloadCard = card(settings, 56, 4)
+local unloadCard = card(settings, 56, 3)
 local unload = button(unloadCard, "Выгрузить KaiFlee", UDim2.fromOffset(8, 8), UDim2.new(1, -16, 0, 35))
 connect(unload.Activated, function() if cleanup then cleanup() end end)
-local yieldCard = card(settings, 80, 5)
+local yieldCard = card(settings, 80, 4)
 local yieldButton = button(yieldCard, "Запустить Infinite Yield", UDim2.fromOffset(8, 6), UDim2.new(1, -16, 0, 35))
 label(yieldCard, "Отдельный запуск снижает нагрузку при входе", 11, UDim2.fromOffset(8, 48), UDim2.new(1, -16, 0, 24), theme.muted)
 connect(yieldButton.Activated, function()
@@ -524,7 +523,7 @@ local function updateNameTag(record, anchor, color, visible)
     end
     assign(record.billboard, "Adornee", anchor)
     assign(record.billboard, "MaxDistance", ESP_DISTANCE)
-    assign(record.billboard, "AlwaysOnTop", config.throughWalls)
+    assign(record.billboard, "AlwaysOnTop", true)
     assign(record.billboard, "Enabled", true)
     assign(record.nameTag, "TextColor3", color)
 end
@@ -641,7 +640,7 @@ local function updateObjects(localRoot)
                 end
                 assign(record.highlight, "Enabled", true)
                 assign(record.highlight, "OutlineColor", color)
-                assign(record.highlight, "DepthMode", config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded)
+                assign(record.highlight, "DepthMode", Enum.HighlightDepthMode.AlwaysOnTop)
             elseif record.highlight then assign(record.highlight, "Enabled", false) end
         end
     end
@@ -662,7 +661,7 @@ local function updatePlayers(localRoot)
             end
             assign(record.highlight, "Enabled", true)
             assign(record.highlight, "OutlineColor", color)
-            assign(record.highlight, "DepthMode", config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded)
+            assign(record.highlight, "DepthMode", Enum.HighlightDepthMode.AlwaysOnTop)
             updateNameTag(record, character:FindFirstChild("Head") or root, color, true)
         else
             if record.character ~= character then clearMarkers(record)
@@ -881,6 +880,7 @@ local function updateRescue(now, ready, hacking)
     end
 end
 local trollBeast, trollCharacter, watchedRope, watchedVictim
+local watchedCarriedTorso
 local beastCheckedAt, lastSlowSend, lastUntieSend = -math.huge, -math.huge, -math.huge
 local trollTokens, trollTokenAt = 4, os.clock()
 local slowRetryAt, untieRetryAt = 0, 0
@@ -903,6 +903,21 @@ local function ropeVictim(rope, beast)
     if second == beast and first and first ~= beast then return first end
     return nil
 end
+local function carriedVictim(beast)
+    local character = beast and beast.Character
+    local carried = character and character:FindFirstChild("CarriedTorso")
+    local torso = carried and carried:IsA("ObjectValue") and carried.Value
+    if not torso or not torso.Parent then return nil end
+    local ancestor = torso.Parent
+    while ancestor and ancestor ~= Workspace do
+        if ancestor:IsA("Model") then
+            local victim = Players:GetPlayerFromCharacter(ancestor)
+            if victim and victim ~= beast and stat(victim, "Captured") ~= true then return victim, torso end
+        end
+        ancestor = ancestor.Parent
+    end
+    return nil
+end
 local function beastRemote(beast, containerName, eventName)
     local character = beast and beast.Character
     if not character or beast == player or not isBeast(beast) or not character:IsDescendantOf(Workspace) then return nil end
@@ -916,7 +931,7 @@ local function trollRequest(event, ...)
     return send(event, ...)
 end
 local function clearTrolling()
-    trollBeast, trollCharacter, watchedRope, watchedVictim = nil, nil, nil, nil
+    trollBeast, trollCharacter, watchedRope, watchedVictim, watchedCarriedTorso = nil, nil, nil, nil, nil
     beastCheckedAt, lastSlowSend, lastUntieSend = -math.huge, -math.huge, -math.huge
     untieNoticeUntil, slowRetryAt, untieRetryAt = 0, 0, 0
 end
@@ -944,15 +959,17 @@ local function updateTrolling(now)
     trollTokens = math.min(4, trollTokens + math.max(0, now - trollTokenAt) * 32)
     trollTokenAt = now
     if config.untie then
-        if watchedRope and not ropeVictim(watchedRope, beast) then
+        local carried, torso = carriedVictim(beast)
+        if (watchedCarriedTorso and watchedCarriedTorso ~= torso) or (watchedRope and not ropeVictim(watchedRope, beast)) then
             local health = watchedVictim and stat(watchedVictim, "Health")
             if watchedVictim and stat(watchedVictim, "Captured") == false and type(health) == "number" and health > 0 then
                 status("untie", "Верёвка снята")
                 untieNoticeUntil = now + 2
             end
-            watchedRope, watchedVictim = nil, nil
+            watchedRope, watchedVictim, watchedCarriedTorso = nil, nil, nil
         end
-        if not watchedRope then
+        if carried then watchedVictim, watchedCarriedTorso = carried, torso end
+        if not carried and not watchedRope then
             for rope in pairs(ropes) do
                 if not rope:IsDescendantOf(Workspace) then ropes[rope] = nil; continue end
                 local victim = ropeVictim(rope, beast)
@@ -962,7 +979,7 @@ local function updateTrolling(now)
                 end
             end
         end
-        if watchedRope and now >= untieRetryAt and now - lastUntieSend >= 0.1 then
+        if (watchedRope or watchedCarriedTorso) and now >= untieRetryAt and now - lastUntieSend >= 0.1 then
             local event = beastRemote(beast, "Hammer", "HammerEvent")
             if event then
                 local sent = trollRequest(event, "HammerClick", true)
@@ -970,8 +987,8 @@ local function updateTrolling(now)
                 if sent then status("untie", "Ожидание подтверждения отвязки")
                 elseif sent == false then untieRetryAt = now + 0.5; status("untie", "Повторное подключение к молоту") end
             else status("untie", "Ожидание события молота") end
-        elseif not watchedRope and now >= untieNoticeUntil then status("untie", "Ожидание верёвки") end
-    else watchedRope, watchedVictim = nil, nil end
+        elseif not watchedRope and not watchedCarriedTorso and now >= untieNoticeUntil then status("untie", "Ожидание верёвки") end
+    else watchedRope, watchedVictim, watchedCarriedTorso = nil, nil, nil end
     if config.slowBeast and now >= slowRetryAt and now - lastSlowSend >= 0.05 then
         local event = beastRemote(beast, "BeastPowers", "PowersEvent")
         if event then
@@ -988,12 +1005,58 @@ local function updateAutomation(now)
     local hacking = (config.noFail or config.autoRescue) and hackingActive() or false
     updateRescue(now, ready, hacking)
 end
+local hackInput
+local statsApis = setmetatable({}, {__mode = "k"})
+local function releaseHackInput()
+    if not hackInput then return end
+    local held = hackInput
+    hackInput = nil
+    if held.stats == statsFor(player) and held.api then pcall(held.api.SetValue, "ActionInput", false) end
+    send(held.remote, "Input", "Action", false)
+end
+local function nativeTiming()
+    local screen = playerGui:FindFirstChild("ScreenGui")
+    local current = screen and screen:FindFirstChild("TimingCircle")
+    if current then miniGames[current] = true end
+    local available = false
+    for object in pairs(miniGames) do
+        if object.Name ~= "TimingCircle" or not object.Parent then continue end
+        available = true
+        if not effectivelyVisible(object) then continue end
+        local pin = object:FindFirstChild("TimingPin", true)
+        local goal = stat(player, "TimingGoalPosition")
+        if pin and type(pin.Rotation) == "number" and type(goal) == "number" and goal > 0 and goal <= 270 then
+            return object, pin.Rotation, goal, true
+        end
+    end
+    return nil, nil, nil, available
+end
+local function statsApi(stats)
+    if not stats:IsA("ModuleScript") then return nil end
+    local cached = statsApis[stats]
+    if cached ~= nil then return cached or nil end
+    local ok, api = pcall(require, stats)
+    if ok and type(api) == "table" and type(api.SetValue) == "function" then
+        statsApis[stats] = api
+        return api
+    end
+    statsApis[stats] = false
+    return nil
+end
 local noFailUntil, noFailStats, noFailMini = 0, nil, false
 local noFailRetryAt, noFailErrorAt = 0, -math.huge
 local function updateNoFail(now)
-    if not config.noFail then noFailUntil, noFailStats, noFailMini, noFailRetryAt = 0, nil, false, 0; return end
+    if not config.noFail then
+        releaseHackInput()
+        noFailUntil, noFailStats, noFailMini, noFailRetryAt = 0, nil, false, 0
+        return
+    end
     if now < noFailRetryAt then return end
     local stats = statsFor(player)
+    if hackInput and (hackInput.stats ~= stats or hackInput.root ~= (player.Character and player.Character:FindFirstChild("HumanoidRootPart"))
+        or not hackInput.circle.Parent or not effectivelyVisible(hackInput.circle) or not localReady() or now - hackInput.started > 2) then
+        releaseHackInput()
+    end
     if noFailStats ~= stats then
         noFailStats = stats
         noFailUntil, lastNoFailSend, noFailMini = 0, -math.huge, false
@@ -1001,6 +1064,28 @@ local function updateNoFail(now)
     if not stats or not localReady() then
         noFailUntil, noFailMini = 0, false
         status("noFail", "Ожидание возможности взлома")
+        return
+    end
+    local circle, rotation, goal, nativeAvailable = nativeTiming()
+    local api = nativeAvailable and statsApi(stats)
+    if api then
+        if circle then
+            if not hackInput and stat(player, "ActionInput") ~= true and rotation >= goal + 6 and rotation <= goal + 78 then
+                local event = remoteEvent()
+                if event then
+                    local ok = pcall(api.SetValue, "ActionInput", true)
+                    if ok then
+                        hackInput = {api = api, stats = stats, remote = event, circle = circle,
+                            root = player.Character and player.Character:FindFirstChild("HumanoidRootPart"), started = now}
+                        if not send(event, "Input", "Action", true) then
+                            releaseHackInput()
+                            noFailRetryAt = now + 0.5
+                        end
+                    end
+                end
+            end
+        end
+        status("noFail", circle and "Штатная проверка сектора" or "Ожидание мини-игры")
         return
     end
     local mini = minigameVisible()
@@ -1021,6 +1106,7 @@ local function updateNoFail(now)
 end
 
 connect(reset.Activated, function()
+    releaseHackInput()
     stopRescue()
     trollPaused = false
     clearTrolling()
@@ -1032,6 +1118,8 @@ end)
 cleanup = function()
     if not alive then return end
     alive = false
+    releaseHackInput()
+    table.clear(statsApis)
     clearTrolling()
     table.clear(ropes)
     stopRescue()
@@ -1127,7 +1215,7 @@ connect(RunService.Heartbeat, function(delta)
         local scanOk, scanError = pcall(stepScans)
         if not scanOk then warn("KaiFlee: поиск объектов: " .. tostring(scanError)); cleanup(); return end
     end
-    if introDone and (config.noFail or noFailStats or noFailUntil ~= 0) then
+    if config.noFail or noFailStats or noFailUntil ~= 0 or hackInput then
         local hackOk, hackError = pcall(updateNoFail, now)
         if not hackOk then
             noFailStats = nil
@@ -1179,7 +1267,7 @@ connect(RunService.Heartbeat, function(delta)
 end)
 selectPage("Visuals")
 updateLighting()
-print("KaiFlee 3.7 загружен. Правый Shift — меню. Настройки > Выгрузить KaiFlee — отключение.")
+print("KaiFlee 3.8 загружен. Правый Shift — меню. Настройки > Выгрузить KaiFlee — отключение.")
 return true
 
 end
@@ -1239,7 +1327,7 @@ end
 startupState = {phase = "starting"}
 environment[runtimeKey] = startupState
 task.spawn(function()
-    print("KaiFlee 3.7: запуск интерфейса; Infinite Yield запускается отдельно в настройках.")
+    print("KaiFlee 3.8: запуск интерфейса; Infinite Yield запускается отдельно в настройках.")
     local ok, message = pcall(startKaiFlee)
     if ok and message == true then startupState.phase = "running"
     elseif ok then
