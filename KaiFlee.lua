@@ -10,7 +10,7 @@ local environment = sharedEnvironment()
 local runtimeKey = "__KaiFleeRuntime"
 local startupState, startupCleanup, startInfiniteYield
 local function startKaiFlee()
--- KaiFlee 3.5 | made by nexus | .gg/znwCgvzBgu
+-- KaiFlee 3.6 | made by nexus | .gg/znwCgvzBgu
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Input = game:GetService("UserInputService")
@@ -29,12 +29,13 @@ end
 
 local config = {
     esp = true, names = false,
-    computers = true, pods = true, throughWalls = true, maxDistance = 5000,
-    fullbright = false, customFov = false, fov = 80,
+    computers = true, pods = true, throughWalls = true,
+    fullbright = false,
     autoRescue = false, noFail = false, slowBeast = false, untie = false,
-    nearOnly = false, slowRadius = 70, dangerCue = false, dangerRadius = 60,
+    dangerCue = false, dangerRadius = 60,
 }
 local defaults = table.clone(config)
+local ESP_DISTANCE = 5000
 local theme = {
     background = Color3.fromRGB(17, 18, 21),
     card = Color3.fromRGB(28, 29, 34), hover = Color3.fromRGB(35, 37, 43),
@@ -59,7 +60,7 @@ local buttonMotions, toggleMotions = {}, {}
 local optionCallbacks = {}
 local alive, cleanup, activeSlider, drag = true, nil, nil, nil
 local menuRequested, introDone, introAge = true, false, 0
-local trollPaused, setTrollPaused, powerText = false, nil, nil
+local powerText
 local selectedPage = "Visuals"
 local function connect(signal, callback)
     local connection = signal:Connect(callback)
@@ -172,7 +173,7 @@ local function stepScans()
 end
 local function label(parent, text, size, position, dimensions, color, bold)
     return make("TextLabel", {
-        BackgroundTransparency = 1, Text = text, TextSize = size or 15,
+        BackgroundTransparency = 1, Text = text, TextSize = (size or 15) + 3,
         Position = position or UDim2.new(), Size = dimensions or UDim2.fromScale(1, 1),
         FontFace = bold and fonts.bold or fonts.regular,
         TextColor3 = color or theme.text, TextXAlignment = Enum.TextXAlignment.Left,
@@ -182,7 +183,7 @@ end
 local function button(parent, text, position, dimensions)
     local object = make("TextButton", {
         BackgroundColor3 = theme.card, TextColor3 = theme.text,
-        Text = text, TextSize = 14, FontFace = fonts.medium,
+        Text = text, TextSize = 17, FontFace = fonts.medium,
         Position = position, Size = dimensions, BorderSizePixel = 0,
         AutoButtonColor = false,
     }, parent)
@@ -244,13 +245,13 @@ corner(avatar, 14)
 local displayName = label(titlebar, player.DisplayName, 13, UDim2.new(1, -134, 0, 18), UDim2.fromOffset(126, 25), theme.muted)
 displayName.TextTruncate = Enum.TextTruncate.AtEnd
 local close = button(window, "×", UDim2.new(1, -48, 0, 20), UDim2.fromOffset(25, 25))
-close.TextSize = 20
+close.TextSize = 24
 close.BackgroundTransparency = 1
 local tabBar = make("Frame", {BackgroundTransparency = 1, Position = UDim2.fromOffset(24, 70), Size = UDim2.fromOffset(WIDTH - 48, 33)}, window)
 local selectedTab = make("Frame", {BackgroundColor3 = theme.card, BorderSizePixel = 0, Size = UDim2.fromOffset(142, 33)}, tabBar)
 corner(selectedTab, 7)
-label(window, "правый shift — меню · f6 — пауза троллинга", 11, UDim2.fromOffset(24, 466), UDim2.fromOffset(470, 20), theme.muted)
-local version = label(window, "3.5", 11, UDim2.new(1, -70, 0, 466), UDim2.fromOffset(46, 20), theme.muted)
+label(window, "правый shift — меню", 11, UDim2.fromOffset(24, 466), UDim2.fromOffset(470, 20), theme.muted)
+local version = label(window, "3.6", 11, UDim2.new(1, -70, 0, 466), UDim2.fromOffset(46, 20), theme.muted)
 version.TextXAlignment = Enum.TextXAlignment.Right
 local function selectPage(name)
     activeSlider = nil
@@ -295,6 +296,7 @@ local function card(parent, height, order)
 end
 local featureNotes = {
     slowBeast = "Не работает · отключено, надпись сохранена",
+    untie = "Не работает · отключено, надпись сохранена",
     noFail = "Частично работает · возможны пропуски",
     autoRescue = "Не проверено в игре",
 }
@@ -310,11 +312,11 @@ local function setOption(key, value)
     if config[key] == nil or type(value) ~= type(config[key]) then return false, "Неверный параметр" end
     if type(value) == "number" then
         if value ~= value or value == math.huge or value == -math.huge then return false, "Неверное число" end
-        local bounds = {maxDistance = {100, 5000}, fov = {50, 110}, slowRadius = {10, 250}, dangerRadius = {15, 150}}
+        local bounds = {dangerRadius = {15, 150}}
         if bounds[key] then value = math.clamp(value, bounds[key][1], bounds[key][2]) end
     end
-    if key == "slowBeast" or key == "nearOnly" or key == "slowRadius" then
-        return false, "Замедление не работает и отключено"
+    if key == "slowBeast" or key == "untie" then
+        return false, "Функция не работает и отключена"
     end
     if config[key] == value then return true end
     config[key] = value
@@ -324,19 +326,19 @@ local function setOption(key, value)
 end
 local function toggle(parent, key, title, order, changed, hasStatus)
     local note = featureNotes[key]
-    local item = card(parent, note and 84 or (hasStatus and 64 or 49), order)
-    local titleLabel = label(item, title, 15, UDim2.fromOffset(8, hasStatus and 6 or 0), UDim2.new(1, -82, 0, hasStatus and 28 or 49))
+    local item = card(parent, note and 98 or (hasStatus and 76 or 56), order)
+    local titleLabel = label(item, title, 15, UDim2.fromOffset(8, hasStatus and 6 or 0), UDim2.new(1, -82, 0, hasStatus and 32 or 56))
     titleLabel.FontFace = fonts.medium
     if note then
-        local noteLabel = label(item, note, 11, UDim2.fromOffset(8, 31), UDim2.new(1, -82, 0, 18),
-            key == "autoRescue" and theme.muted or (key == "slowBeast" and theme.red or Color3.fromRGB(223, 179, 104)))
+        local noteLabel = label(item, note, 11, UDim2.fromOffset(8, 39), UDim2.new(1, -82, 0, 21),
+            key == "autoRescue" and theme.muted or ((key == "slowBeast" or key == "untie") and theme.red or Color3.fromRGB(223, 179, 104)))
         noteLabel.Name = "FeatureNote_" .. key
     end
     if hasStatus then
-        featureLabels[key] = label(item, "", 11, UDim2.fromOffset(8, note and 53 or 33), UDim2.new(1, -82, 0, 21), theme.muted)
+        featureLabels[key] = label(item, "", 11, UDim2.fromOffset(8, note and 64 or 40), UDim2.new(1, -82, 0, 24), theme.muted)
     end
     local switch = button(item, "", UDim2.new(1, -52, 0.5, -11), UDim2.fromOffset(42, 22))
-    if key == "slowBeast" or key == "nearOnly" then
+    if key == "slowBeast" or key == "untie" then
         switch.Active, switch.Selectable = false, false
     end
     corner(switch, 11)
@@ -358,11 +360,11 @@ local function toggle(parent, key, title, order, changed, hasStatus)
     end)
 end
 local function slider(parent, key, title, low, high, step, suffix, order, changed)
-    local item = card(parent, 64, order)
-    label(item, title, 14, UDim2.fromOffset(8, 3), UDim2.new(1, -126, 0, 28))
-    local readout = label(item, "", 12, UDim2.new(1, -119, 0, 3), UDim2.fromOffset(109, 28), theme.muted)
+    local item = card(parent, 72, order)
+    label(item, title, 14, UDim2.fromOffset(8, 3), UDim2.new(1, -126, 0, 32))
+    local readout = label(item, "", 12, UDim2.new(1, -119, 0, 3), UDim2.fromOffset(109, 32), theme.muted)
     readout.TextXAlignment = Enum.TextXAlignment.Right
-    local track = make("TextButton", {Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 33), Size = UDim2.new(1, -20, 0, 24)}, item)
+    local track = make("TextButton", {Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Position = UDim2.fromOffset(10, 40), Size = UDim2.new(1, -20, 0, 24)}, item)
     local bar = make("Frame", {BackgroundColor3 = theme.line, BorderSizePixel = 0, Position = UDim2.new(0, 0, 0.5, -2), Size = UDim2.new(1, 0, 0, 4)}, track)
     corner(bar, 2)
     local fill = make("Frame", {BackgroundColor3 = theme.white, BorderSizePixel = 0, Size = UDim2.fromScale(0, 1)}, bar)
@@ -387,7 +389,6 @@ local function slider(parent, key, title, low, high, step, suffix, order, change
     end
     connect(track.InputBegan, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            if key == "slowRadius" then return end
             activeSlider = {set = setAt, input = input, touch = input.UserInputType == Enum.UserInputType.Touch}
             setAt(input.Position.X)
         end
@@ -471,8 +472,7 @@ connect(Input.InputEnded, function(input)
 end)
 connect(Input.InputBegan, function(input, processed)
     if processed or Input:GetFocusedTextBox() then return end
-    if input.KeyCode == Enum.KeyCode.RightShift then setVisible(not menuRequested)
-    elseif input.KeyCode == Enum.KeyCode.F6 and setTrollPaused then setTrollPaused(not trollPaused) end
+    if input.KeyCode == Enum.KeyCode.RightShift then setVisible(not menuRequested) end
 end)
 local lightingOriginal, lightingOverrides, changingLighting = {}, {
     Brightness = 2, ClockTime = 14, FogEnd = 100000,
@@ -502,36 +502,6 @@ local function updateLighting()
     end
     changingLighting = false
 end
-local camera, cameraOriginal, cameraConnection, changingCamera
-local function restoreCamera()
-    if cameraConnection then cameraConnection:Disconnect(); cameraConnection = nil end
-    if camera and cameraOriginal then pcall(function() camera.FieldOfView = cameraOriginal end) end
-end
-local function updateCamera()
-    local current = Workspace.CurrentCamera
-    if camera ~= current then
-        restoreCamera()
-        camera, cameraOriginal = current, current and current.FieldOfView or nil
-        if camera then
-            cameraConnection = camera:GetPropertyChangedSignal("FieldOfView"):Connect(function()
-                if changingCamera then return end
-                cameraOriginal = camera.FieldOfView
-                if config.customFov then
-                    changingCamera = true
-                    camera.FieldOfView = config.fov
-                    changingCamera = false
-                end
-            end)
-        end
-    end
-    if camera then
-        changingCamera = true
-        camera.FieldOfView = config.customFov and config.fov or cameraOriginal
-        changingCamera = false
-    end
-end
-connect(Workspace:GetPropertyChangedSignal("CurrentCamera"), updateCamera)
-
 toggle(visuals, "esp", "ESP игроков", 1)
 toggle(visuals, "names", "Ники игроков", 2)
 toggle(visuals, "computers", "Компьютеры", 3)
@@ -542,23 +512,18 @@ toggle(automation, "dangerCue", "Предупреждение об опасно�
 slider(automation, "dangerRadius", "Радиус предупреждения", 15, 150, 5, "", 4)
 toggle(trolling, "slowBeast", "Замедление чудовища", 1, nil, true)
 toggle(trolling, "untie", "Автоотвязка мирных", 2, nil, true)
-toggle(trolling, "nearOnly", "Ограничить радиус замедления", 3)
-slider(trolling, "slowRadius", "Радиус замедления", 10, 250, 5, "", 4)
-local powerCard = card(trolling, 43, 5)
+local powerCard = card(trolling, 52, 3)
 powerText = label(powerCard, "Ожидание способности чудовища", 12, UDim2.fromOffset(8, 0), UDim2.new(1, -16, 1, 0), theme.muted)
 toggle(settings, "throughWalls", "ESP сквозь стены", 1)
-slider(settings, "maxDistance", "Дальность ESP", 100, 5000, 100, "", 2)
-toggle(settings, "fullbright", "Яркое освещение", 3, updateLighting)
-toggle(settings, "customFov", "Свой угол обзора", 4, updateCamera)
-slider(settings, "fov", "Угол обзора", 50, 110, 1, "°", 5, updateCamera)
-local resetCard = card(settings, 51, 6)
+toggle(settings, "fullbright", "Яркое освещение", 2, updateLighting)
+local resetCard = card(settings, 56, 3)
 local reset = button(resetCard, "Сбросить настройки", UDim2.fromOffset(8, 8), UDim2.new(1, -16, 0, 35))
-local unloadCard = card(settings, 51, 7)
+local unloadCard = card(settings, 56, 4)
 local unload = button(unloadCard, "Выгрузить KaiFlee", UDim2.fromOffset(8, 8), UDim2.new(1, -16, 0, 35))
 connect(unload.Activated, function() if cleanup then cleanup() end end)
-local yieldCard = card(settings, 71, 8)
+local yieldCard = card(settings, 80, 5)
 local yieldButton = button(yieldCard, "Запустить Infinite Yield", UDim2.fromOffset(8, 6), UDim2.new(1, -16, 0, 35))
-label(yieldCard, "Отдельный запуск снижает нагрузку при входе", 11, UDim2.fromOffset(8, 43), UDim2.new(1, -16, 0, 22), theme.muted)
+label(yieldCard, "Отдельный запуск снижает нагрузку при входе", 11, UDim2.fromOffset(8, 48), UDim2.new(1, -16, 0, 24), theme.muted)
 connect(yieldButton.Activated, function()
     task.spawn(function()
         if not alive then return end
@@ -579,8 +544,7 @@ control.OnInvoke = function(command, key, value)
         return table.clone(config)
     end
     if command == "show" then setVisible(key == true); return true end
-    if command == "pause" and setTrollPaused then return setTrollPaused(key == true) end
-    if command == "paused" then return trollPaused end
+    if command == "pause" or command == "paused" then return false end
     if command == "status" then
         local snapshot = {}
         for name, item in pairs(featureLabels) do snapshot[name] = item.Text end
@@ -643,7 +607,7 @@ local function updateNameTag(record, anchor, color, visible)
         record.nameTag.TextStrokeTransparency = 0.35
     end
     assign(record.billboard, "Adornee", anchor)
-    assign(record.billboard, "MaxDistance", config.maxDistance)
+    assign(record.billboard, "MaxDistance", ESP_DISTANCE)
     assign(record.billboard, "AlwaysOnTop", config.throughWalls)
     assign(record.billboard, "Enabled", true)
     assign(record.nameTag, "TextColor3", color)
@@ -748,7 +712,7 @@ local function updateObjects(localRoot)
             end
             local anchor = color and objectAnchor(object, preferred)
             local distance = localRoot and anchor and (anchor.Position - localRoot.Position).Magnitude or nil
-            if distance and distance <= config.maxDistance then
+            if distance and distance <= ESP_DISTANCE then
                 if not record.highlight then
                     if markerBudget <= 0 then continue end
                     markerBudget = markerBudget - 1
@@ -773,7 +737,7 @@ local function updatePlayers(localRoot)
         local color = beast and theme.red or theme.white
         local distance = localRoot and root and (root.Position - localRoot.Position).Magnitude or nil
         local enabled = config.esp and humanoid ~= nil and humanoid.Health > 0 and distance ~= nil
-            and distance <= config.maxDistance
+            and distance <= ESP_DISTANCE
         if enabled then
             if record.character ~= character or not record.highlight then
                 if not buildMarkers(record, character) then continue end
@@ -869,7 +833,7 @@ local function rescueNotice(text, now)
     status("autoRescue", text)
     print("KaiFlee: спасение: " .. text)
 end
-local lastRescueSend, lastNoFailSend, lastUntieSend = -math.huge, -math.huge, -math.huge
+local lastRescueSend, lastNoFailSend = -math.huge, -math.huge
 local function stopRescue()
     if not rescueSession then return end
     local session = rescueSession
@@ -988,54 +952,6 @@ local function updateRescue(now, ready, hacking)
         status("autoRescue", "Спасение: " .. session.victim.DisplayName)
     end
 end
-local function beastEvent(beast, containerName, eventName)
-    if not beast or beast == player or not isBeast(beast) then return nil end
-    local character = beast.Character
-    if not character or character == player.Character or not character:IsDescendantOf(Workspace) then return nil end
-    local container = character:FindFirstChild(containerName)
-    local event = container and container:FindFirstChild(eventName)
-    if event and event:IsA("RemoteEvent") and event:IsDescendantOf(character) then return event end
-    return nil
-end
-local function beastRope(character, ropes, previous)
-    local holder = character:FindFirstChild("Part")
-    local primary = holder and holder:FindFirstChild("RopeConstraint")
-    local best, bestScore
-    for rope in pairs(ropes) do
-        if not rope:IsDescendantOf(character) then ropes[rope] = nil
-        else
-            local score = rope == primary and 40 or 0
-            local a0, a1 = rope.Attachment0, rope.Attachment1
-            if rope.Enabled == false and not a0 and not a1 then continue end
-            if a0 and a1 then score = score + 80 end
-            for _, attachment in ipairs({a0 or false, a1 or false}) do
-                local parent = attachment and attachment.Parent
-                if parent and not parent:IsDescendantOf(character) then score = score + 80 end
-            end
-            if rope == previous then score = score + 1 end
-            if not best or score > bestScore then best, bestScore = rope, score end
-        end
-    end
-    return best
-end
-local function ropeVictim(rope, beast)
-    for _, name in ipairs({"Attachment0", "Attachment1"}) do
-        local attachment = rope[name]
-        local ancestor = attachment and attachment.Parent
-        while ancestor and ancestor ~= Workspace do
-            if ancestor:IsA("Model") then
-                local target = Players:GetPlayerFromCharacter(ancestor)
-                if target and target ~= beast then return target end
-            end
-            ancestor = ancestor.Parent
-        end
-    end
-    return nil
-end
-local trollTarget, trollCharacter, watchedRope, watchedVictim
-local untieNoticeUntil, untieBoostUntil = 0, 0
-local trollRopes, trollConnections = {}, {}
-local trollTokens, trollTokenTime = 4, nil
 local observedPowerName, observedPowerActive, lastPowerText
 local powerNames = {Runner = "Бегун", Stalker = "Сталкер", Seer = "Провидец", Hacker = "Хакер"}
 local function powerState()
@@ -1043,7 +959,7 @@ local function powerState()
     local active = ReplicatedStorage:FindFirstChild("PowerActive")
     return name and name:IsA("StringValue") and name.Value or "", active and active:IsA("BoolValue") and active.Value or false
 end
-local function updatePowerState(now)
+local function updatePowerState()
     local name, active = powerState()
     local changed = observedPowerName ~= name or observedPowerActive ~= active
     if changed then
@@ -1053,87 +969,6 @@ local function updatePowerState(now)
         local text = name ~= "" and ("Способность: " .. (powerNames[name] or name) .. (active and " · активна" or "")) or "Способность ещё не выбрана"
         if text ~= lastPowerText then powerText.Text = text; lastPowerText = text end
     end
-end
-local function trollRequest(event, ...)
-    if trollTokens < 1 then return nil end
-    trollTokens = trollTokens - 1
-    return send(event, ...)
-end
-local function clearTrollTarget()
-    for _, connection in ipairs(trollConnections) do connection:Disconnect() end
-    table.clear(trollConnections)
-    table.clear(trollRopes)
-    trollTarget, trollCharacter, watchedRope, watchedVictim = nil, nil, nil, nil
-    untieNoticeUntil, untieBoostUntil = 0, 0
-    lastUntieSend = -math.huge
-end
-local function bindTrollTarget(beast, now)
-    clearTrollTarget()
-    local character = beast.Character
-    trollTarget, trollCharacter = beast, character
-    local function add(object)
-        if trollCharacter ~= character or not object:IsA("RopeConstraint") or trollRopes[object] then return end
-        trollRopes[object] = true
-        untieBoostUntil = os.clock() + 0.35
-        lastUntieSend = -math.huge
-    end
-    table.insert(trollConnections, character.DescendantAdded:Connect(add))
-    table.insert(trollConnections, character.DescendantRemoving:Connect(function(object)
-        if trollCharacter == character then trollRopes[object] = nil end
-    end))
-    for _, object in ipairs(character:GetDescendants()) do add(object) end
-end
-setTrollPaused = function(value)
-    trollPaused = value == true and config.untie
-    clearTrollTarget()
-    if config.untie then status("untie", trollPaused and "Пауза · F6" or "Поиск верёвки") end
-    return trollPaused
-end
-local function updateUntie(beast, character, now)
-    if not config.untie then watchedRope, watchedVictim = nil, nil; return end
-    local rope = beastRope(character, trollRopes, watchedRope)
-    if watchedRope and watchedRope ~= rope then
-        local health = watchedVictim and stat(watchedVictim, "Health")
-        local detached = not watchedRope:IsDescendantOf(character)
-        if detached and watchedVictim and stat(watchedVictim, "Captured") ~= true and type(health) == "number" and health > 0 then
-            status("untie", "Верёвка снята")
-            untieNoticeUntil = now + 2
-        end
-        watchedRope, watchedVictim = nil, nil
-    end
-    if not rope then
-        if now >= untieNoticeUntil then status("untie", "Ожидание верёвки") end
-        return
-    end
-    watchedRope = rope
-    watchedVictim = ropeVictim(rope, beast) or watchedVictim
-    if now - lastUntieSend < (now < untieBoostUntil and 0.05 or 0.12) then return end
-    local event = beastEvent(beast, "Hammer", "HammerEvent")
-    if not event then status("untie", "Ожидание молота чудовища")
-    else
-        local sent = trollRequest(event, "HammerClick", true)
-        if sent ~= nil then lastUntieSend = now end
-        if sent then status("untie", "Цель: " .. beast.DisplayName .. " · отвязка")
-        elseif sent == false then disableFeature("untie", "Ошибка события молота") end
-    end
-end
-local function updateTrolling(now)
-    updatePowerState(now)
-    if not config.untie then clearTrollTarget(); return end
-    if trollPaused then return end
-    local map, mapKnown = activeMap()
-    local beast = not isBeast(player) and currentBeast() or nil
-    if (mapKnown and not map) or not beast then
-        clearTrollTarget()
-        local message = isBeast(player) and "Ты играешь за чудовище" or "Ожидание чудовища"
-        if config.untie then status("untie", message) end
-        return
-    end
-    local character = beast.Character
-    if trollTarget ~= beast or trollCharacter ~= character then bindTrollTarget(beast, now) end
-    if trollTokenTime then trollTokens = math.min(4, trollTokens + math.max(0, now - trollTokenTime) * 32) end
-    trollTokenTime = now
-    updateUntie(beast, character, now)
 end
 local function updateAutomation(now)
     local ready = localReady()
@@ -1174,24 +1009,19 @@ end
 
 connect(reset.Activated, function()
     stopRescue()
-    trollPaused = false
-    clearTrollTarget()
     table.clear(rescueCooldowns)
     for key, value in pairs(defaults) do config[key] = value end
     for _, paint in pairs(painters) do paint() end
     updateLighting()
-    updateCamera()
 end)
 cleanup = function()
     if not alive then return end
     alive = false
-    clearTrollTarget()
     stopRescue()
     for _, connection in ipairs(connections) do connection:Disconnect() end
     table.clear(connections)
     config.fullbright = false
     pcall(updateLighting)
-    restoreCamera()
     for _, record in pairs(records) do clearMarkers(record) end
     for _, record in pairs(objects) do clearObjectMarkers(record) end
     table.clear(records)
@@ -1216,7 +1046,7 @@ task.spawn(function()
     end)
     if alive and ok then avatar.Image = thumbnail end
 end)
-local lastViewport, updateElapsed, automationElapsed, trollingElapsed, errors = Vector2.new(), 0, 0, 0, 0
+local lastViewport, updateElapsed, automationElapsed, powerElapsed, errors = Vector2.new(), 0, 0, 0, 0
 local function animate(delta)
     local viewport = viewportSize()
     if viewport.X ~= lastViewport.X or viewport.Y ~= lastViewport.Y then
@@ -1312,17 +1142,11 @@ connect(RunService.Heartbeat, function(delta)
             warn("KaiFlee: автоматика: " .. tostring(autoError))
         end
     end
-    trollingElapsed = trollingElapsed + delta
-    if introDone and trollingElapsed >= (config.untie and not trollPaused and 0.05 or 0.2) then
-        trollingElapsed = 0
-        local trollOk, trollError = pcall(updateTrolling, now)
-        if not trollOk then
-            for _, key in ipairs({"untie"}) do
-                if config[key] then disableFeature(key, "Ошибка · см. консоль Xeno") end
-            end
-            clearTrollTarget()
-            warn("KaiFlee: троллинг: " .. tostring(trollError))
-        end
+    powerElapsed = powerElapsed + delta
+    if introDone and powerElapsed >= 0.2 then
+        powerElapsed = 0
+        local ok, message = pcall(updatePowerState)
+        if not ok then warn("KaiFlee: способность чудовища: " .. tostring(message)) end
     end
     updateElapsed = updateElapsed + delta
     if updateElapsed < 0.1 then return end
@@ -1352,8 +1176,7 @@ connect(RunService.Heartbeat, function(delta)
 end)
 selectPage("Visuals")
 updateLighting()
-updateCamera()
-print("KaiFlee 3.5 загружен. Правый Shift — меню. F6 — пауза троллинга. Настройки > Выгрузить KaiFlee — отключение.")
+print("KaiFlee 3.6 загружен. Правый Shift — меню. Настройки > Выгрузить KaiFlee — отключение.")
 return true
 
 end
@@ -1413,7 +1236,7 @@ end
 startupState = {phase = "starting"}
 environment[runtimeKey] = startupState
 task.spawn(function()
-    print("KaiFlee 3.5: запуск интерфейса; Infinite Yield запускается отдельно в настройках.")
+    print("KaiFlee 3.6: запуск интерфейса; Infinite Yield запускается отдельно в настройках.")
     local ok, message = pcall(startKaiFlee)
     if ok and message == true then startupState.phase = "running"
     elseif ok then
