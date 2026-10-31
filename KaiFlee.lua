@@ -1,6 +1,16 @@
 -- KaiFlee + Infinite Yield | made by nexus | .gg/znwCgvzBgu
+local function sharedEnvironment()
+    if type(getgenv) == "function" then
+        local ok, value = pcall(getgenv)
+        if ok and type(value) == "table" then return value end
+    end
+    return _G
+end
+local environment = sharedEnvironment()
+local runtimeKey = "__KaiFleeRuntime"
+local startupState, startupCleanup, startInfiniteYield
 local function startKaiFlee()
--- KaiFlee 3.4 | made by nexus | .gg/znwCgvzBgu
+-- KaiFlee 3.5 | made by nexus | .gg/znwCgvzBgu
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Input = game:GetService("UserInputService")
@@ -40,6 +50,11 @@ local fonts = {
 }
 local WIDTH, HEIGHT = 640, 500
 local connections, objects, records, pages, tabs, painters = {}, {}, {}, {}, {}, {}
+local scanJobs, fadeGroups, fadeEntries = {}, {}, {}
+local fadeDirty, markerBudget = false, 0
+local function assign(object, key, value)
+    if object[key] ~= value then object[key] = value end
+end
 local buttonMotions, toggleMotions = {}, {}
 local optionCallbacks = {}
 local alive, cleanup, activeSlider, drag = true, nil, nil, nil
@@ -52,9 +67,17 @@ local function connect(signal, callback)
     return connection
 end
 local function make(className, properties, parent)
+    local opacity
+    if className == "CanvasGroup" then
+        className = "Frame"
+        properties = table.clone(properties or {})
+        opacity = 1 - (properties.GroupTransparency or 0)
+        properties.GroupTransparency = nil
+    end
     local object = Instance.new(className)
     for key, value in pairs(properties or {}) do object[key] = value end
     object.Parent = parent
+    if opacity then fadeGroups[object] = opacity end
     return object
 end
 local function corner(object, radius)
@@ -81,6 +104,71 @@ local function advance(state, delta)
         state.value, state.velocity = state.target, 0
     end
     return state.value
+end
+local function moving(state)
+    return state.value ~= state.target or state.velocity ~= 0
+end
+local function setOpacity(group, opacity)
+    opacity = math.clamp(opacity, 0, 1)
+    if fadeGroups[group] ~= opacity then fadeGroups[group], fadeDirty = opacity, true end
+end
+local function prepareFades(rootGui)
+    for _, object in ipairs(rootGui:GetDescendants()) do
+        local groups, ancestor = {}, object
+        while ancestor and ancestor ~= rootGui do
+            if fadeGroups[ancestor] ~= nil then table.insert(groups, ancestor) end
+            ancestor = ancestor.Parent
+        end
+        if #groups == 0 then continue end
+        local properties = {}
+        if object:IsA("GuiObject") then
+            properties.BackgroundTransparency = object.BackgroundTransparency or 0
+            if object:IsA("TextLabel") or object:IsA("TextButton") then
+                properties.TextTransparency = object.TextTransparency or 0
+                properties.TextStrokeTransparency = object.TextStrokeTransparency or 1
+            elseif object:IsA("ImageLabel") or object:IsA("ImageButton") then
+                properties.ImageTransparency = object.ImageTransparency or 0
+            end
+            if object:IsA("ScrollingFrame") then properties.ScrollBarImageTransparency = object.ScrollBarImageTransparency or 0 end
+        elseif object:IsA("UIStroke") then properties.Transparency = object.Transparency or 0 end
+        if next(properties) then table.insert(fadeEntries, {object = object, groups = groups, properties = properties}) end
+    end
+    fadeDirty = true
+end
+local function flushFades()
+    if not fadeDirty then return end
+    fadeDirty = false
+    for _, entry in ipairs(fadeEntries) do
+        if not entry.object.Parent then continue end
+        local opacity = 1
+        for _, group in ipairs(entry.groups) do opacity = opacity * (fadeGroups[group] or 0) end
+        for property, base in pairs(entry.properties) do assign(entry.object, property, 1 - (1 - base) * opacity) end
+    end
+end
+local function queueScan(rootObject, callback)
+    table.insert(scanJobs, {root = rootObject, callback = callback, stack = {{object = rootObject, index = 0}}})
+end
+local function stepScans()
+    local deadline, remaining = os.clock() + 0.001, 80
+    for jobIndex = #scanJobs, 1, -1 do
+        local job = scanJobs[jobIndex]
+        while #job.stack > 0 and remaining > 0 and os.clock() < deadline do
+            local frame = job.stack[#job.stack]
+            if not frame.children then frame.children = frame.object:GetChildren() end
+            frame.index = frame.index + 1
+            local child = frame.children[frame.index]
+            if not child then table.remove(job.stack)
+            else
+                remaining = remaining - 1
+                if child:IsDescendantOf(job.root) and child.Name ~= "KaiFlee" and child.Name ~= "KaiFleeEffects" then
+                    job.callback(child)
+                    table.insert(job.stack, {object = child, index = 0})
+                end
+            end
+        end
+        if #job.stack == 0 then table.remove(scanJobs, jobIndex) end
+        if remaining <= 0 or os.clock() >= deadline then break end
+    end
 end
 local function label(parent, text, size, position, dimensions, color, bold)
     return make("TextLabel", {
@@ -116,6 +204,17 @@ local gui = make("ScreenGui", {
     Name = "KaiFlee", ResetOnSpawn = false, IgnoreGuiInset = true,
     DisplayOrder = 50, ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 }, playerGui)
+startupCleanup = function()
+    alive = false
+    for _, connection in ipairs(connections) do connection:Disconnect() end
+    table.clear(connections)
+    table.clear(scanJobs)
+    table.clear(fadeEntries)
+    table.clear(fadeGroups)
+    local partialEffects = Workspace:FindFirstChild("KaiFleeEffects")
+    if partialEffects then partialEffects:Destroy() end
+    gui:Destroy()
+end
 local shutdown = make("BindableEvent", {Name = "Shutdown"}, gui)
 local effects = make("Folder", {Name = "KaiFleeEffects"}, Workspace)
 local shell = make("Frame", {
@@ -151,7 +250,7 @@ local tabBar = make("Frame", {BackgroundTransparency = 1, Position = UDim2.fromO
 local selectedTab = make("Frame", {BackgroundColor3 = theme.card, BorderSizePixel = 0, Size = UDim2.fromOffset(142, 33)}, tabBar)
 corner(selectedTab, 7)
 label(window, "правый shift — меню · f6 — пауза троллинга", 11, UDim2.fromOffset(24, 466), UDim2.fromOffset(470, 20), theme.muted)
-local version = label(window, "3.4", 11, UDim2.new(1, -70, 0, 466), UDim2.fromOffset(46, 20), theme.muted)
+local version = label(window, "3.5", 11, UDim2.new(1, -70, 0, 466), UDim2.fromOffset(46, 20), theme.muted)
 version.TextXAlignment = Enum.TextXAlignment.Right
 local function selectPage(name)
     activeSlider = nil
@@ -195,7 +294,7 @@ local function card(parent, height, order)
     return item
 end
 local featureNotes = {
-    slowBeast = "Не работает · ожидает исправления",
+    slowBeast = "Не работает · отключено, надпись сохранена",
     noFail = "Частично работает · возможны пропуски",
     autoRescue = "Не проверено в игре",
 }
@@ -214,6 +313,10 @@ local function setOption(key, value)
         local bounds = {maxDistance = {100, 5000}, fov = {50, 110}, slowRadius = {10, 250}, dangerRadius = {15, 150}}
         if bounds[key] then value = math.clamp(value, bounds[key][1], bounds[key][2]) end
     end
+    if key == "slowBeast" or key == "nearOnly" or key == "slowRadius" then
+        return false, "Замедление не работает и отключено"
+    end
+    if config[key] == value then return true end
     config[key] = value
     if optionCallbacks[key] then optionCallbacks[key](value) end
     if painters[key] then painters[key]() end
@@ -233,6 +336,9 @@ local function toggle(parent, key, title, order, changed, hasStatus)
         featureLabels[key] = label(item, "", 11, UDim2.fromOffset(8, note and 53 or 33), UDim2.new(1, -82, 0, 21), theme.muted)
     end
     local switch = button(item, "", UDim2.new(1, -52, 0.5, -11), UDim2.fromOffset(42, 22))
+    if key == "slowBeast" or key == "nearOnly" then
+        switch.Active, switch.Selectable = false, false
+    end
     corner(switch, 11)
     local thumb = make("Frame", {BorderSizePixel = 0, Size = UDim2.fromOffset(14, 14)}, switch)
     corner(thumb, 7)
@@ -281,6 +387,7 @@ local function slider(parent, key, title, low, high, step, suffix, order, change
     end
     connect(track.InputBegan, function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            if key == "slowRadius" then return end
             activeSlider = {set = setAt, input = input, touch = input.UserInputType == Enum.UserInputType.Touch}
             setAt(input.Position.X)
         end
@@ -449,6 +556,21 @@ local reset = button(resetCard, "Сбросить настройки", UDim2.fro
 local unloadCard = card(settings, 51, 7)
 local unload = button(unloadCard, "Выгрузить KaiFlee", UDim2.fromOffset(8, 8), UDim2.new(1, -16, 0, 35))
 connect(unload.Activated, function() if cleanup then cleanup() end end)
+local yieldCard = card(settings, 71, 8)
+local yieldButton = button(yieldCard, "Запустить Infinite Yield", UDim2.fromOffset(8, 6), UDim2.new(1, -16, 0, 35))
+label(yieldCard, "Отдельный запуск снижает нагрузку при входе", 11, UDim2.fromOffset(8, 43), UDim2.new(1, -16, 0, 22), theme.muted)
+connect(yieldButton.Activated, function()
+    task.spawn(function()
+        if not alive then return end
+        yieldButton.Text = "Infinite Yield · загрузка"
+        local ok, message = pcall(startInfiniteYield)
+        if not alive then return end
+        local state = environment.__KaiFleeInfiniteYieldLoader
+        yieldButton.Text = environment.IY_LOADED and "Infinite Yield запущен" or "Запустить Infinite Yield"
+        if not ok then warn("Infinite Yield: " .. tostring(message))
+        elseif state and state.error then yieldButton.Text = "Infinite Yield · повторить загрузку" end
+    end)
+end)
 local control = make("BindableFunction", {Name = "Control"}, gui)
 control.OnInvoke = function(command, key, value)
     if command == "set" then return setOption(key, value) end
@@ -495,11 +617,14 @@ local function clearMarkers(record)
 end
 local function buildMarkers(record, character)
     clearMarkers(record)
+    if markerBudget <= 0 then return false end
+    markerBudget = markerBudget - 1
     record.character = character
     record.highlight = make("Highlight", {
         Name = "Player_" .. record.player.UserId, Adornee = character,
         FillTransparency = 1, OutlineTransparency = 0, Enabled = false,
     }, effects)
+    return true
 end
 local function updateNameTag(record, anchor, color, visible)
     if not config.names or not visible then
@@ -517,11 +642,11 @@ local function updateNameTag(record, anchor, color, visible)
         record.nameTag.TextStrokeColor3 = Color3.new(0, 0, 0)
         record.nameTag.TextStrokeTransparency = 0.35
     end
-    record.billboard.Adornee = anchor
-    record.billboard.MaxDistance = config.maxDistance
-    record.billboard.AlwaysOnTop = config.throughWalls
-    record.billboard.Enabled = true
-    record.nameTag.TextColor3 = color
+    assign(record.billboard, "Adornee", anchor)
+    assign(record.billboard, "MaxDistance", config.maxDistance)
+    assign(record.billboard, "AlwaysOnTop", config.throughWalls)
+    assign(record.billboard, "Enabled", true)
+    assign(record.nameTag, "TextColor3", color)
 end
 local function addPlayer(target)
     if target ~= player and not records[target] then records[target] = {player = target} end
@@ -549,7 +674,7 @@ local function removeObject(object)
 end
 connect(Workspace.DescendantAdded, registerObject)
 connect(Workspace.DescendantRemoving, removeObject)
-for _, object in ipairs(Workspace:GetDescendants()) do registerObject(object) end
+queueScan(Workspace, registerObject)
 local function activeMap()
     local reference = ReplicatedStorage:FindFirstChild("CurrentMap")
     if reference and reference:IsA("ObjectValue") then
@@ -625,15 +750,17 @@ local function updateObjects(localRoot)
             local distance = localRoot and anchor and (anchor.Position - localRoot.Position).Magnitude or nil
             if distance and distance <= config.maxDistance then
                 if not record.highlight then
+                    if markerBudget <= 0 then continue end
+                    markerBudget = markerBudget - 1
                     record.highlight = make("Highlight", {
                         Name = "Object_" .. record.id, Adornee = object, FillTransparency = 1,
                         OutlineTransparency = 0, Enabled = false,
                     }, effects)
                 end
-                record.highlight.Enabled = true
-                record.highlight.OutlineColor = color
-                record.highlight.DepthMode = config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
-            else clearObjectMarkers(record) end
+                assign(record.highlight, "Enabled", true)
+                assign(record.highlight, "OutlineColor", color)
+                assign(record.highlight, "DepthMode", config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded)
+            elseif record.highlight then assign(record.highlight, "Enabled", false) end
         end
     end
 end
@@ -648,12 +775,18 @@ local function updatePlayers(localRoot)
         local enabled = config.esp and humanoid ~= nil and humanoid.Health > 0 and distance ~= nil
             and distance <= config.maxDistance
         if enabled then
-            if record.character ~= character or not record.highlight then buildMarkers(record, character) end
-            record.highlight.Enabled = true
-            record.highlight.OutlineColor = color
-            record.highlight.DepthMode = config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded
+            if record.character ~= character or not record.highlight then
+                if not buildMarkers(record, character) then continue end
+            end
+            assign(record.highlight, "Enabled", true)
+            assign(record.highlight, "OutlineColor", color)
+            assign(record.highlight, "DepthMode", config.throughWalls and Enum.HighlightDepthMode.AlwaysOnTop or Enum.HighlightDepthMode.Occluded)
             updateNameTag(record, character:FindFirstChild("Head") or root, color, true)
-        else clearMarkers(record) end
+        else
+            if record.character ~= character then clearMarkers(record)
+            elseif record.highlight then assign(record.highlight, "Enabled", false) end
+            updateNameTag(record, nil, color, false)
+        end
     end
 end
 
@@ -665,7 +798,7 @@ local function registerMinigame(object)
 end
 connect(playerGui.DescendantAdded, registerMinigame)
 connect(playerGui.DescendantRemoving, function(object) miniGames[object] = nil end)
-for _, object in ipairs(playerGui:GetDescendants()) do registerMinigame(object) end
+queueScan(playerGui, registerMinigame)
 local function effectivelyVisible(object)
     local current = object
     while current and current ~= playerGui do
@@ -736,7 +869,7 @@ local function rescueNotice(text, now)
     status("autoRescue", text)
     print("KaiFlee: спасение: " .. text)
 end
-local lastRescueSend, lastNoFailSend, lastSlowSend, lastUntieSend = -math.huge, -math.huge, -math.huge, -math.huge
+local lastRescueSend, lastNoFailSend, lastUntieSend = -math.huge, -math.huge, -math.huge
 local function stopRescue()
     if not rescueSession then return end
     local session = rescueSession
@@ -915,7 +1048,6 @@ local function updatePowerState(now)
     local changed = observedPowerName ~= name or observedPowerActive ~= active
     if changed then
         observedPowerName, observedPowerActive = name, active
-        lastSlowSend = -math.huge
     end
     if powerText and (changed or not lastPowerText) then
         local text = name ~= "" and ("Способность: " .. (powerNames[name] or name) .. (active and " · активна" or "")) or "Способность ещё не выбрана"
@@ -933,7 +1065,7 @@ local function clearTrollTarget()
     table.clear(trollRopes)
     trollTarget, trollCharacter, watchedRope, watchedVictim = nil, nil, nil, nil
     untieNoticeUntil, untieBoostUntil = 0, 0
-    lastSlowSend, lastUntieSend = -math.huge, -math.huge
+    lastUntieSend = -math.huge
 end
 local function bindTrollTarget(beast, now)
     clearTrollTarget()
@@ -952,9 +1084,8 @@ local function bindTrollTarget(beast, now)
     for _, object in ipairs(character:GetDescendants()) do add(object) end
 end
 setTrollPaused = function(value)
-    trollPaused = value == true and (config.slowBeast or config.untie)
+    trollPaused = value == true and config.untie
     clearTrollTarget()
-    if config.slowBeast then status("slowBeast", trollPaused and "Пауза · F6" or "Поиск чудовища") end
     if config.untie then status("untie", trollPaused and "Пауза · F6" or "Поиск верёвки") end
     return trollPaused
 end
@@ -986,36 +1117,15 @@ local function updateUntie(beast, character, now)
         elseif sent == false then disableFeature("untie", "Ошибка события молота") end
     end
 end
-local function updateSlow(beast, now)
-    if not config.slowBeast then return end
-    if config.nearOnly then
-        local ownRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-        local otherRoot = beast.Character and beast.Character:FindFirstChild("HumanoidRootPart")
-        if not ownRoot or not otherRoot then status("slowBeast", "Ожидание персонажа"); return end
-        if (otherRoot.Position - ownRoot.Position).Magnitude > config.slowRadius then
-            status("slowBeast", "Цель вне радиуса"); return
-        end
-    end
-    if now - lastSlowSend < (1 / 60) then return end
-    local event = beastEvent(beast, "BeastPowers", "PowersEvent")
-    if not event then status("slowBeast", "Ожидание способности чудовища")
-    else
-        local sent = trollRequest(event, "Jumped")
-        if sent ~= nil then lastSlowSend = now end
-        if sent then status("slowBeast", "Цель: " .. beast.DisplayName)
-        elseif sent == false then disableFeature("slowBeast", "Ошибка события чудовища") end
-    end
-end
 local function updateTrolling(now)
     updatePowerState(now)
-    if not (config.slowBeast or config.untie) then clearTrollTarget(); return end
+    if not config.untie then clearTrollTarget(); return end
     if trollPaused then return end
     local map, mapKnown = activeMap()
     local beast = not isBeast(player) and currentBeast() or nil
     if (mapKnown and not map) or not beast then
         clearTrollTarget()
         local message = isBeast(player) and "Ты играешь за чудовище" or "Ожидание чудовища"
-        if config.slowBeast then status("slowBeast", message) end
         if config.untie then status("untie", message) end
         return
     end
@@ -1024,7 +1134,6 @@ local function updateTrolling(now)
     if trollTokenTime then trollTokens = math.min(4, trollTokens + math.max(0, now - trollTokenTime) * 32) end
     trollTokenTime = now
     updateUntie(beast, character, now)
-    updateSlow(beast, now)
 end
 local function updateAutomation(now)
     local ready = localReady()
@@ -1090,10 +1199,15 @@ cleanup = function()
     table.clear(miniGames)
     table.clear(buttonMotions)
     table.clear(toggleMotions)
+    table.clear(scanJobs)
+    table.clear(fadeEntries)
+    table.clear(fadeGroups)
+    if environment[runtimeKey] == startupState then environment[runtimeKey] = nil end
     activeSlider, drag = nil, nil
     effects:Destroy()
     gui:Destroy()
 end
+startupCleanup = cleanup
 connect(shutdown.Event, cleanup)
 connect(gui.Destroying, cleanup)
 task.spawn(function()
@@ -1105,47 +1219,63 @@ end)
 local lastViewport, updateElapsed, automationElapsed, trollingElapsed, errors = Vector2.new(), 0, 0, 0, 0
 local function animate(delta)
     local viewport = viewportSize()
-    if viewport ~= lastViewport then
+    if viewport.X ~= lastViewport.X or viewport.Y ~= lastViewport.Y then
         lastViewport = viewport
         fitScale.Scale = math.min(1, math.max(0.2, (viewport.X - 32) / WIDTH), math.max(0.2, (viewport.Y - 32) / HEIGHT))
         clampWindow()
     end
-    for _, motion in ipairs(buttonMotions) do motion.scale.Scale = advance(motion.spring, delta) end
-    for _, motion in ipairs(toggleMotions) do
-        local value = advance(motion.state, delta)
-        motion.switch.BackgroundColor3 = theme.line:Lerp(theme.white, math.clamp(value, 0, 1))
-        motion.thumb.BackgroundColor3 = theme.muted:Lerp(theme.background, math.clamp(value, 0, 1))
-        motion.thumb.Position = UDim2.fromOffset(4 + 20 * value, 4)
-    end
-    selectedTab.Position = UDim2.fromOffset(advance(tabMotion, delta), 0)
-    local active = pages[selectedPage]
-    if active then
-        active.group.Position = UDim2.fromOffset(24 + advance(pageMotion, delta), 120)
-        active.group.GroupTransparency = 1 - math.clamp(advance(pageOpacity, delta), 0, 1)
+    if shell.Visible then
+        for _, motion in ipairs(buttonMotions) do
+            if moving(motion.spring) then motion.scale.Scale = advance(motion.spring, delta) end
+        end
+        for _, motion in ipairs(toggleMotions) do
+            if moving(motion.state) or not motion.painted then
+                local value = advance(motion.state, delta)
+                motion.switch.BackgroundColor3 = theme.line:Lerp(theme.white, math.clamp(value, 0, 1))
+                motion.thumb.BackgroundColor3 = theme.muted:Lerp(theme.background, math.clamp(value, 0, 1))
+                motion.thumb.Position = UDim2.fromOffset(4 + 20 * value, 4)
+                motion.painted = true
+            end
+        end
+        if moving(tabMotion) then selectedTab.Position = UDim2.fromOffset(advance(tabMotion, delta), 0) end
+        local active = pages[selectedPage]
+        if active then
+            if moving(pageMotion) then active.group.Position = UDim2.fromOffset(24 + advance(pageMotion, delta), 120) end
+            if moving(pageOpacity) then setOpacity(active.group, advance(pageOpacity, delta)) end
+        end
     end
     if not introDone then
         introAge = introAge + delta
         splashScale.Scale = advance(introScale, delta)
-        splash.GroupTransparency = 1 - math.clamp(advance(introOpacity, delta), 0, 1)
+        setOpacity(splash, advance(introOpacity, delta))
         progressFill.Size = UDim2.fromScale(math.clamp(introAge / 2.25, 0, 1), 1)
         logo.Rotation = 6 * math.exp(-introAge * 3) * math.sin(introAge * 9)
         if introAge >= 2.25 then introScale.target, introOpacity.target = 1.045, 0 end
         if introAge >= 2.6 then
             introDone = true
             splash:Destroy()
+            fadeGroups[splash] = nil
+            for index = #fadeEntries, 1, -1 do
+                if table.find(fadeEntries[index].groups, splash) then table.remove(fadeEntries, index) end
+            end
             setVisible(menuRequested)
         end
     end
-    windowScale.Scale = advance(windowSizeMotion, delta)
+    if moving(windowSizeMotion) then windowScale.Scale = advance(windowSizeMotion, delta) end
     local opacity = math.clamp(advance(windowOpacity, delta), 0, 1)
-    window.GroupTransparency = 1 - opacity
-    window.Position = UDim2.new(0.5, 0, 0.5, advance(windowOffset, delta))
-    if introDone and not menuRequested and opacity < 0.001 then shell.Visible = false end
+    setOpacity(window, opacity)
+    if moving(windowOffset) then window.Position = UDim2.new(0.5, 0, 0.5, advance(windowOffset, delta)) end
+    if introDone and not menuRequested and opacity < 0.001 then assign(shell, "Visible", false) end
     local danger = math.clamp(advance(dangerMotion, delta), 0, 1)
-    dangerFrame.Visible = danger > 0.003
-    local pulse = 0.82 + 0.18 * math.sin(os.clock() * 4)
-    for _, bar in ipairs(dangerBars) do bar.BackgroundTransparency = 1 - danger * pulse end
+    assign(dangerFrame, "Visible", danger > 0.003)
+    if danger > 0.003 then
+        local pulse = 0.82 + 0.18 * math.sin(os.clock() * 4)
+        for _, bar in ipairs(dangerBars) do bar.BackgroundTransparency = 1 - danger * pulse end
+    end
+    flushFades()
 end
+prepareFades(gui)
+flushFades()
 connect(RunService.RenderStepped, function(delta)
     local ok, message = pcall(animate, delta)
     if not ok then warn("KaiFlee: анимация: " .. tostring(message)); cleanup() end
@@ -1153,7 +1283,11 @@ end)
 connect(RunService.Heartbeat, function(delta)
     if not alive then return end
     local now = os.clock()
-    if introDone then
+    if #scanJobs > 0 then
+        local scanOk, scanError = pcall(stepScans)
+        if not scanOk then warn("KaiFlee: поиск объектов: " .. tostring(scanError)); cleanup(); return end
+    end
+    if introDone and (config.noFail or noFailStats or noFailUntil ~= 0) then
         local hackOk, hackError = pcall(updateNoFail, now)
         if not hackOk then
             noFailStats = nil
@@ -1167,7 +1301,7 @@ connect(RunService.Heartbeat, function(delta)
         end
     end
     automationElapsed = automationElapsed + delta
-    if introDone and automationElapsed >= 0.05 then
+    if introDone and automationElapsed >= 0.05 and (config.autoRescue or rescueSession) then
         automationElapsed = 0
         local autoOk, autoError = pcall(updateAutomation, now)
         if not autoOk then
@@ -1179,11 +1313,11 @@ connect(RunService.Heartbeat, function(delta)
         end
     end
     trollingElapsed = trollingElapsed + delta
-    if introDone and (((config.slowBeast or config.untie) and not trollPaused) or trollingElapsed >= 0.2) then
+    if introDone and trollingElapsed >= (config.untie and not trollPaused and 0.05 or 0.2) then
         trollingElapsed = 0
         local trollOk, trollError = pcall(updateTrolling, now)
         if not trollOk then
-            for _, key in ipairs({"slowBeast", "untie"}) do
+            for _, key in ipairs({"untie"}) do
                 if config[key] then disableFeature(key, "Ошибка · см. консоль Xeno") end
             end
             clearTrollTarget()
@@ -1196,6 +1330,7 @@ connect(RunService.Heartbeat, function(delta)
     local ok, message = pcall(function()
         local character = player.Character
         local root = character and character:FindFirstChild("HumanoidRootPart")
+        markerBudget = 4
         updatePlayers(root)
         updateObjects(root)
         dangerMotion.target = 0
@@ -1218,16 +1353,12 @@ end)
 selectPage("Visuals")
 updateLighting()
 updateCamera()
-print("KaiFlee 3.4 загружен. Правый Shift — меню. F6 — пауза троллинга. Настройки > Выгрузить KaiFlee — отключение.")
+print("KaiFlee 3.5 загружен. Правый Shift — меню. F6 — пауза троллинга. Настройки > Выгрузить KaiFlee — отключение.")
+return true
 
 end
 
-local function startInfiniteYield()
-    local environment = _G
-    if type(getgenv) == "function" then
-        local ok, value = pcall(getgenv)
-        if ok and type(value) == "table" then environment = value end
-    end
+startInfiniteYield = function()
     local key = "__KaiFleeInfiniteYieldLoader"
     local previous = environment[key]
     if type(previous) ~= "table" then previous = nil end
@@ -1274,8 +1405,22 @@ local function startInfiniteYield()
     print("Infinite Yield загружен из официального EdgeIY/infiniteyield.")
 end
 
+local previousRuntime = environment[runtimeKey]
+if type(previousRuntime) == "table" and (previousRuntime.phase == "starting" or previousRuntime.phase == "running") then
+    print("KaiFlee уже запущен или загружается. Правый Shift — меню.")
+    return
+end
+startupState = {phase = "starting"}
+environment[runtimeKey] = startupState
 task.spawn(function()
+    print("KaiFlee 3.5: запуск интерфейса; Infinite Yield запускается отдельно в настройках.")
     local ok, message = pcall(startKaiFlee)
-    if not ok then warn("KaiFlee: ошибка запуска: " .. tostring(message)) end
+    if ok and message == true then startupState.phase = "running"
+    elseif ok then
+        if environment[runtimeKey] == startupState then environment[runtimeKey] = nil end
+    else
+        if startupCleanup then pcall(startupCleanup) end
+        if environment[runtimeKey] == startupState then environment[runtimeKey] = nil end
+        warn("KaiFlee: ошибка запуска: " .. tostring(message))
+    end
 end)
-task.spawn(startInfiniteYield)
